@@ -656,6 +656,26 @@ body.quake .wrap{animation:shake .45s}
 .terms{max-height:58vh;overflow:auto;margin-top:8px;padding-right:4px}
 .terms h4{font-family:'Jua';font-weight:400;font-size:15px;margin-top:12px}
 .terms p{font-size:13.5px;line-height:1.7;color:#3a2a1d}
+
+/* 대시보드 탭 · 평가 */
+.dtabs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px;align-items:center}
+.dtabs button{font-size:15px;padding:9px 14px}.dtabs button.sel{background:var(--ink);color:var(--label)}
+.dtabs #dStale{margin-left:auto;background:var(--orange)}
+.evtop{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.evtbl th,.evtbl td{white-space:nowrap;font-size:13px}
+.lv{display:inline-block;min-width:34px;text-align:center;border-radius:4px;padding:1px 6px;font-family:'Jua';font-size:12px;border:1.5px solid var(--ink)}
+.lv.hi{background:var(--green2)}.lv.mid{background:var(--yellow)}.lv.lo{background:#ffe0d6}.lv.na{background:#eee;color:var(--ink2)}
+.rub summary{cursor:pointer;font-family:'Jua';font-size:14px}.rub ul{margin:8px 0 0 18px;font-size:13px;line-height:1.7}
+.evtbl tr.on td{background:var(--yellow)}
+.evcard{background:#fbf7ef;border:2.5px solid var(--ink);border-radius:8px;padding:12px}
+.evhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;font-family:'Jua'}.evhead>b{font-family:'Black Han Sans';font-weight:400;font-size:19px}.evhead #evX{margin-left:auto}
+.edbox{display:grid;grid-template-columns:1.1fr 1fr;gap:16px;padding:6px 2px;text-align:left}
+.edbox h4{font-family:'Jua';font-weight:400;font-size:15px;margin-bottom:6px}
+.edbox textarea{width:100%;font-family:'Gowun Dodum';font-size:14px;line-height:1.6;padding:8px;border:2px solid var(--ink);border-radius:5px;resize:vertical}
+.edbox .rq{font-size:13.5px;line-height:1.6;margin:3px 0}.edbox .rq b{font-family:'Jua';font-weight:400}
+.sdc{font-size:12px;color:var(--ink2);text-align:right;margin-top:2px}
+table.mini th,table.mini td{font-size:12.5px;padding:4px 6px}table.mini td.l{white-space:normal;text-align:left;min-width:180px}
+@media (max-width:900px){ .edbox{grid-template-columns:1fr} }
 /* ================= 반응형: 휴대폰 · 태블릿 세로 · 태블릿/노트북 가로 · 전자칠판 ================= */
 .pgrid,.pside,.pmain{min-width:0}
 @media (min-width:700px){
@@ -1298,7 +1318,8 @@ var LocalStore = {
     this.subs.push(f); f(); return function(){ self.subs=self.subs.filter(function(x){return x!==f;}); }; },
   watchRoom:function(cls,cb){ var self=this; var f=function(){ cb(clone(self.read().rooms[cls]||{teams:{},events:[]})); };
     this.subs.push(f); f(); return function(){ self.subs=self.subs.filter(function(x){return x!==f;}); }; },
-  clearRoom:function(cls){ var db=this.read(); delete db.rooms[cls]; this.write(db); return Promise.resolve(); }
+  clearRoom:function(cls){ var db=this.read(); delete db.rooms[cls]; this.write(db); return Promise.resolve(); },
+  watchAll:function(cb){ var self=this; var f=function(){ cb(clone(self.read().rooms||{})); }; this.subs.push(f); f(); return function(){ self.subs=self.subs.filter(function(x){return x!==f;}); }; }
 };
 /* 저장용 사본: 일회성 이벤트(_ev)는 빼고, undefined 값은 지워서 Firestore가 거부하지 않게 */
 function storeDoc(nt){ var c=JSON.parse(JSON.stringify(nt)); delete c._ev; return c; }
@@ -1313,7 +1334,14 @@ var FireStore = {
   teamRef:function(cls,id){ return this.roomRef(cls).collection('teams').doc(String(id)); },
   updateTeam:function(cls,id,fn){ var ref=this.teamRef(cls,id);
     return this.db.runTransaction(function(tx){ return tx.get(ref).then(function(s){ var t=s.exists?s.data():null; var nt=fn(clone(t));
-      if(nt===undefined) return t; if(nt===null){ tx.delete(ref); return null; } tx.set(ref,storeDoc(nt)); return nt; }); }); },
+      if(nt===undefined) return t; if(nt===null){ tx.delete(ref); return null; } tx.set(ref,storeDoc(nt)); return nt; }); })
+    .then(function(res){ if(res && !FireStore._touched[cls]){ FireStore._touched[cls]=1; FireStore.roomRef(cls).set({cls:cls, touched:Date.now()},{merge:true}).catch(function(){}); } return res; }); },
+  _touched:{},
+  watchAll:function(cb){ var self=this, rooms={}, subs={}, t=null; function emit(){ clearTimeout(t); t=setTimeout(function(){ cb(clone(rooms)); },150); }
+    var u=this.db.collection(CONFIG.collection).onSnapshot(function(qq){ var seen={}; qq.forEach(function(d){ var id=d.id; seen[id]=1; rooms[id]=rooms[id]||{teams:{},events:[]}; rooms[id].events=d.data().events||[];
+        if(!subs[id]) subs[id]=self.roomRef(id).collection('teams').onSnapshot(function(q2){ rooms[id].teams={}; q2.forEach(function(x){ rooms[id].teams[x.id]=x.data(); }); emit(); }); });
+      Object.keys(subs).forEach(function(id){ if(!seen[id]){ subs[id](); delete subs[id]; delete rooms[id]; } }); emit(); });
+    return function(){ u(); Object.keys(subs).forEach(function(id){ subs[id](); }); }; },
   pushEvent:function(cls,text,kind){ var ref=this.roomRef(cls);
     return this.db.runTransaction(function(tx){ return tx.get(ref).then(function(s){ var r=s.exists?s.data():{events:[]};
       r.events=(r.events||[]).concat([{ts:Date.now(),text:text,kind:kind||''}]).slice(-40); tx.set(ref,r); }); }).catch(function(e){ console.warn(e); }); },
@@ -1407,6 +1435,7 @@ function startTeam(t){ if(!t||t.status!=='lobby') return undefined; var seats=SE
   if(seats.length===1) t.solo=true; t.seats=seats; t.n=t.solo?1:seats.length; t.objs=(OBJ_BY_N[t.n]||OBJ_BY_N[4]).slice(); t.objs.forEach(function(o){ t.gauge[o]=100; });
   t.status='play'; t.round=0; t.start=Date.now(); t._ev={text:'🚚 '+t.id+'모둠 출발! (물건 '+t.objs.length+'개 '+t.objs.map(function(o){return OBJ[o].emoji;}).join('')+')', kind:'start'}; return t; }
 function flushEv(cls,t){ if(t&&t._ev){ var e=t._ev; delete t._ev; if(!t.solo) S.pushEvent(cls,e.text,e.kind); } }
+function addLog(t,e){ t.log=t.log||{}; var seat=ME&&ME.seat||'A'; e.at=Date.now(); (t.log[seat]=t.log[seat]||[]).push(e); if(t.log[seat].length>200) t.log[seat]=t.log[seat].slice(-200); }
 function stat(t,seat){ t.stats[seat]=t.stats[seat]||{wrong:0,hints:0,mist:{}}; return t.stats[seat]; }
 
 /* ============================== 학생 ============================== */
@@ -1639,7 +1668,7 @@ function bindChat(){ var o=$('bClueOpen'), f=$('bFab'), bar=$('bClueBar'); if(o)
   function rer(){ var cb=$('clueBody'); if(cb){ cb.innerHTML=cluesHtml(TEAM.round); bindChat(); } }
   if($('bShape')) $('bShape').onclick=function(){ if(!LOCAL.chatShape && !farOpen()){ SFX.bad(); toast('🔒 아직 잠겨 있어! 날짜순으로 이어서 먼저 풀어 봐.<br>반짇고리 자물쇠를 2번 틀리면 열려.'); return; }
     if(!LOCAL.chatShape && !TEAM.farPaid){ askBox({title:'🔭 멀리서 보기를 열까요?', msg:'말풍선 모양만 보이는 힌트예요.<br>대신 <b>👕 티셔츠 섬유 −5</b>', ok:'열기', cb:function(){
-        S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; if(!t.farPaid){ t.farPaid=true; t.gauge.shirt=Math.max(0,(t.gauge.shirt||0)-5); stat(t,ME.seat).hints++; } return t; })
+        S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; if(!t.farPaid){ t.farPaid=true; t.gauge.shirt=Math.max(0,(t.gauge.shirt||0)-5); stat(t,ME.seat).hints++; addLog(t,{ty:'far',o:'shirt',r:t.round,s:'shirt-far'}); } return t; })
         .then(function(t){ if(t) TEAM=t; LOCAL.chatShape=true; SFX.hint(); rer(); if(t && t.gauge.shirt<=0 && !LOCAL.dying && myObjs().indexOf('shirt')>=0) die('shirt', t.round, GAUGE_DEATH.shirt, []); }); }}); return; }
     LOCAL.chatShape=!LOCAL.chatShape; SFX.tap(); rer(); };
   LOCAL.farState=farOpen(); }
@@ -1651,6 +1680,7 @@ function sceneHtml(obj,r,step){ var sc=SCN[obj][r], st=sc.steps[step], key=obj+'
    +(st.q?'<div class="q">'+st.q+'</div>':'')+(st.pre||'')+'<div id="puz">'+PZ[st.type].html(st,ctx)+'</div><div class="fb" id="fb"></div>'
    +'<div class="hintbox" id="hintbox"></div><div class="foot"><button class="alt small" id="bHint">💡 '+OBJ[obj].buddy+'에게 힌트 (−5)</button></div><div id="memlist">'+memListHtml()+'</div></div></div>'; }
 function bindStep(obj,r,step){ var sc=SCN[obj][r], st=sc.steps[step], key=obj+'|'+r+'|'+step, lock=false;
+  if(!LOCAL.sw || LOCAL.sw.key!==key) LOCAL.sw={key:key, t0:Date.now(), w:0, h:0};
   var ctx={team:TEAM, L:LOCAL.pz[key]};
   var talk = step===0 ? sc.intro : (st.type==='gate' ? (TEAM.memories[st.need]?st.after:'아무것도… 기억나지 않아.') : ({choice:'어떻게 할래? 잘 골라.',word:'자물쇠야. 4글자.',num:'숫자를 넣어.',info:'잘 봐 둬.',wash:'으아악, 돌아간다!!',scratch:'문질러! 세게!',pieces:'조각을 맞춰 봐.'}[st.type]||'할 수 있어. 천천히.'));
   typeInto($('btx'),talk);
@@ -1659,12 +1689,12 @@ function bindStep(obj,r,step){ var sc=SCN[obj][r], st=sc.steps[step], key=obj+'|
     hb.innerHTML='<b>💡 '+OBJ[obj].buddy+'의 힌트</b>'+ht; hb.classList.add('show'); $('bHint').textContent='💡 힌트 다시 보기'; if(scroll) hb.scrollIntoView({behavior:'smooth',block:'center'}); }
   if(LOCAL.hinted[key]) showHint(false);
   $('bHint').onclick=function(){ if(LOCAL.hinted[key]) return showHint(true);
-    askBox({title:'💡 힌트를 볼까요?', msg:OBJ[obj].buddy+'에게 물어보면 알려 줘.<br>대신 <b>'+OBJ[obj].gauge+' −5</b>', ok:'힌트 보기', cb:function(){ LOCAL.hinted[key]=true; hurt(obj,5,'hint'); showHint(true); SFX.hint(); }}); };
+    askBox({title:'💡 힌트를 볼까요?', msg:OBJ[obj].buddy+'에게 물어보면 알려 줘.<br>대신 <b>'+OBJ[obj].gauge+' −5</b>', ok:'힌트 보기', cb:function(){ LOCAL.hinted[key]=true; if(LOCAL.sw) LOCAL.sw.h++; hurt(obj,5,'hint'); showHint(true); SFX.hint(); }}); };
   if(st.type==='info'||!st.hint) $('bHint').style.visibility='hidden';
   var api={
     locked:function(){ return lock; },
     ok:function(msg,extra){ if(lock) return; lock=true; if(st.type==='word'||st.type==='num') SFX.unlock(); else sOk(); later(450,SFX.stamp); fb(true,msg||'좋아!'); var s=document.createElement('div'); s.className='stamp green in'; s.style.cssText='right:14px;top:58px;font-size:22px'; s.textContent='통과'; $('scene').appendChild(s); setTimeout(function(){ advance(obj,r,step,extra); }, msg?1900:700); },
-    bad:function(msg,el){ sNo(); if(el){ el.classList.add('shake'); setTimeout(function(){ el.classList.remove('shake'); },400); } fb(false,(msg||'아니야, 다시!')+'<small class="clawwarn">🦾 틀릴 때마다 집게가 내려와! '+OBJ[obj].gauge+' −10 · 0이 되면 끌려간다</small>'); claw('drop'); hurt(obj,10,'wrong',st.id); },
+    bad:function(msg,el){ sNo(); if(LOCAL.sw) LOCAL.sw.w++; if(el){ el.classList.add('shake'); setTimeout(function(){ el.classList.remove('shake'); },400); } fb(false,(msg||'아니야, 다시!')+'<small class="clawwarn">🦾 틀릴 때마다 집게가 내려와! '+OBJ[obj].gauge+' −10 · 0이 되면 끌려간다</small>'); claw('drop'); hurt(obj,10,'wrong',st.id); },
     die:function(ending,give){ if(lock) return; lock=true; die(obj,r,ending,give||[]); },
     hurt:function(n,kind){ hurt(obj,n,kind||'wash'); },
     next:function(){ if(lock) return; lock=true; advance(obj,r,step); },
@@ -1682,10 +1712,11 @@ function advance(obj,r,step,extra){ clearTimers();
     if(p.step!==step||p.done) return undefined; var n=SCN[obj][r].steps.length;
     if(extra&&extra.gaugePlus) t.gauge[obj]=Math.min(100,t.gauge[obj]+extra.gaugePlus);
     if(obj==='pet'&&r===0&&step===0&&LOCAL.label) t.label=LOCAL.label;
+    var st=SCN[obj][r].steps[step]; if(st && st.type!=='info'){ var sw=(LOCAL.sw&&LOCAL.sw.key===obj+'|'+r+'|'+step)?LOCAL.sw:{t0:Date.now(),w:0,h:0}; addLog(t,{s:st.id||(obj+'-'+r+'-'+step),ty:st.type,o:obj,r:r,ok:1,sec:Math.round((Date.now()-sw.t0)/1000),w:sw.w,h:sw.h}); }
     p.step=step+1; if(p.step>=n) p.done=true; t.prog[k]=p; return tryAdvance(t); })
   .then(function(t){ LOCAL.manualTab=false; flushEv(ME.cls,t); }); }
 function die(obj,r,ending,give){ if(LOCAL.dying) return; LOCAL.dying=true; clearTimers(); claw('drop'); sDeath();
-  S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; t.deaths=(t.deaths||0)+1; t.endings[ending]=(t.endings[ending]||0)+1; t.deathLog.push({obj:obj,ending:ending,r:r});
+  S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; t.deaths=(t.deaths||0)+1; t.endings[ending]=(t.endings[ending]||0)+1; t.deathLog.push({obj:obj,ending:ending,r:r,seat:ME.seat}); var pp=t.prog[pkey(obj,r)]||{step:0}, dst=SCN[obj][r].steps[pp.step]||{}; addLog(t,{s:dst.id||(obj+'-'+r+'-'+pp.step),ty:dst.type||'',o:obj,r:r,die:ending,sec:LOCAL.sw?Math.round((Date.now()-LOCAL.sw.t0)/1000):0,w:LOCAL.sw?LOCAL.sw.w:0,h:LOCAL.sw?LOCAL.sw.h:0});
     (give||[]).forEach(function(m){ t.memories[m]=true; }); t.gauge[obj]=50; t.prog[pkey(obj,r)]={step:0,done:false};
     t._ev={text:'💀 '+t.id+'모둠의 '+OBJ[obj].name+OBJ[obj].josa+' '+ENDINGS[ending].name+'을 맞았다', kind:'death'}; return t; })
   .then(function(t){ flushEv(ME.cls,t); showEnding(obj,ending,give||[]); }); }
@@ -1707,10 +1738,10 @@ function waitHtml(obj,r){ var t=TEAM, memo=t.memos[pkey(obj,r)];
   else h+='<p class="muted mt">친구들을 기다리는 중… 아직 못 끝낸 친구가 있다면 <b>네 화면의 단서</b>를 알려 주고 도와줘!</p><div style="font-size:30px;margin-top:8px" class="bob">🚚</div>';
   return h+'</div>'; }
 function bindMemo(obj,r){ var sel=null, b=$('bMemo'); if(!b) return;
-  qa('[data-m]').forEach(function(x){ x.onclick=function(){ qa('[data-m]').forEach(function(y){y.classList.remove('okk');}); x.classList.add('okk'); sel=x.dataset.m; b.disabled=false; }; });
+  qa('button[data-m]').forEach(function(x){ x.onclick=function(){ qa('button[data-m]').forEach(function(y){y.classList.remove('okk');}); x.classList.add('okk'); sel=x.dataset.m; b.disabled=false; }; });
   $('iMemo').oninput=function(){ b.disabled=!(sel||$('iMemo').value.trim()); };
   b.onclick=function(){ var txt=$('iMemo').value.trim()||sel; b.disabled=true;
-    S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; t.memos[pkey(obj,r)]={from:ME.seat+' '+ME.name, text:txt}; return tryAdvance(t); }).then(function(t){ flushEv(ME.cls,t); LOCAL.stepKey=null; route(); }); }; }
+    S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; t.memos[pkey(obj,r)]={from:ME.seat+' '+ME.name, text:txt, seat:ME.seat}; addLog(t,{ty:'memo',o:obj,r:r,s:'memo',txt:txt.slice(0,120)}); return tryAdvance(t); }).then(function(t){ flushEv(ME.cls,t); LOCAL.stepKey=null; route(); }); }; }
 function soloDoneHtml(obj){ var t=TEAM, r=t.round, left=myObjs().filter(function(o){ return !(t.prog[pkey(o,r)]||{}).done; });
   return '<div class="lbl pad center pop" style="position:relative"><div class="stamp green in" style="right:12px;top:12px;font-size:18px">통과</div><div class="bob" style="display:inline-block">'+sticker(obj,'happy',96)+'</div><h2>'+OBJ[obj].name+' — '+ROUNDS[r].name+' 통과!</h2>'
    +(left.length?'<p class="muted mt">이번 라운드에 남은 물건: '+left.map(function(o){return OBJ[o].emoji+' '+OBJ[o].name;}).join(', ')+'</p><button class="mt2" id="bNextObj">다음 물건으로 ▶</button>':'<p class="muted mt">모든 물건 완료! 다음 라운드로 이동 중…</p>')+'</div>'; }
@@ -1783,7 +1814,7 @@ function startGame(){ stopGame(); var A=$('gameArena'), W=A.clientWidth, G={item
     addScore(delta); G.state='move'; }; });
   LOCAL.gameCheat=function(){ addScore(gameTarget(TEAM)); }; }
 function addScore(delta){ var tg=gameTarget(TEAM);
-  S.updateTeam(ME.cls,ME.team,function(t){ if(!t||t.status!=='final') return undefined; var f=t.final||{presses:[],last:0}; f.score=Math.max(0,(f.score||0)+delta); f.by=f.by||{}; f.by[ME.seat]=Math.max(0,(f.by[ME.seat]||0)+delta);
+  S.updateTeam(ME.cls,ME.team,function(t){ if(!t||t.status!=='final') return undefined; var f=t.final||{presses:[],last:0}; f.score=Math.max(0,(f.score||0)+delta); f.gc=f.gc||{}; var gc=f.gc[ME.seat]=f.gc[ME.seat]||{ok:0,ng:0}; if(delta>0) gc.ok++; else gc.ng++; f.by=f.by||{}; f.by[ME.seat]=Math.max(0,(f.by[ME.seat]||0)+delta);
     if(f.score>=gameTarget(t) && !f.awake){ f.awake=true; t._ev={text:'🦾 '+t.id+'모둠 선별 크레인 가동!', kind:'info'}; } t.final=f; return t; })
   .then(function(t){ flushEv(ME.cls,t); if(t){ TEAM=t; gameHud(); if((t.final.score||0)>=tg){ stopGame(); SFX.win(); toast('🦾 크레인이 깨어났다! 경로 스위치가 올라온다…'); setTimeout(route,900); } } }); }
 function twist(){ var obj=myObjs()[0]||'pet', bud=OBJ[obj].buddy;
@@ -1894,14 +1925,15 @@ function stepLabel(id){ var o=id.split('-')[0]; var all={}; Object.keys(SCN).for
 function viewTeacher(){ var ok=false; try{ ok=sessionStorage.getItem('tag_t')==='1'; }catch(e){}
   if(!ok){ askBox({title:'🔒 교사 대시보드', msg:'교사 비밀번호를 입력하세요', input:'password', noCancel:true, check:function(v){ return v===CONFIG.teacherPin?'':'비밀번호가 틀렸어요'; }, cb:function(){ try{ sessionStorage.setItem('tag_t','1'); }catch(e){} LOCAL.tOk=true; viewTeacher(); }}); if(!LOCAL.tOk) return; }
   var cls=qs('teacher'); if(!cls){ askBox({title:'반 코드', input:'text', ph:'1-3', noCancel:true, cb:function(v){ history.replaceState(null,'','?teacher='+encodeURIComponent(v)); viewTeacher(); }}); return; }
-  S.watchRoom(cls,function(room){ var teams=Object.keys(room.teams).map(function(k){return room.teams[k];}).sort(function(a,b){ return (a.solo?1:0)-(b.solo?1:0) || ((+a.id||0)-(+b.id||0)); });
+  LOCAL.dashCls=cls; LOCAL.dashTab=LOCAL.dashTab||'live'; stopWatch();
+  LOCAL.dashFn=function(all){ LOCAL.allRooms=all; if(LOCAL.dashTab!=='live'){ dashStale(); return; } var room=all[cls]||{teams:{},events:[]}; var teams=Object.keys(room.teams).map(function(k){return room.teams[k];}).sort(function(a,b){ return (a.solo?1:0)-(b.solo?1:0) || ((+a.id||0)-(+b.id||0)); });
     var mist={}, memos=[];
     teams.forEach(function(t){ Object.keys(t.stats||{}).forEach(function(s){ var m=t.stats[s].mist||{}; Object.keys(m).forEach(function(k){ mist[k]=(mist[k]||0)+m[k]; }); });
       Object.keys(t.memos||{}).forEach(function(k){ memos.push(t.id+'모둠 · '+OBJ[k.split('_')[0]].emoji+' R'+(+k.split('_')[1]+1)+' · '+t.memos[k].from+': '+t.memos[k].text); }); });
     var refls=[]; teams.forEach(function(t){ Object.keys(t.refl||{}).forEach(function(s){ var r=t.refl[s]; refls.push({team:t.solo?'개인':t.id+'모둠', name:r.name||((t.players[s]||{}).name)||s, learn:r.learn, realize:r.realize, act:r.act, at:r.at}); }); });
     LOCAL.refls=refls;
     var done=teams.filter(function(t){return t.status==='done';}), deaths=teams.reduce(function(a,t){return a+(t.deaths||0);},0);
-    $app.innerHTML='<div class="wrap wide-wrap">'+TAPE+'<div class="hud" style="display:flex;align-items:center"><h2>👩‍🏫 교사 대시보드 · '+esc(cls)+'</h2><span class="k" style="margin-left:auto">'+(S.mode==='local'?'로컬 테스트 모드':'Firebase 실시간')+' · TV 화면: ?tv='+esc(cls)+'</span></div>'
+    $app.innerHTML='<div class="wrap wide-wrap">'+TAPE+'<div class="hud" style="display:flex;align-items:center"><h2>👩‍🏫 교사 대시보드 · '+esc(cls)+'</h2><span class="k" style="margin-left:auto">'+(S.mode==='local'?'로컬 테스트 모드':'Firebase 실시간')+' · TV 화면: ?tv='+esc(cls)+'</span></div>'+dashTabs(cls)
      +'<div class="kpis"><div class="lbl">참여 모둠/개인<b>'+teams.length+'</b></div><div class="lbl">탈출<b>'+done.length+'</b></div><div class="lbl">총 반송(죽음)<b>'+deaths+'</b></div><div class="lbl">인수인계 메모<b>'+memos.length+'</b></div><div class="lbl">다짐 제출<b>'+refls.length+'</b></div></div>'
      +'<div class="lbl tblwrap"><table><thead><tr><th>모둠</th><th>인원 → 물건</th><th>상태</th><th>자리별 (지금 맡은 물건 · 완료)</th><th>반송</th><th>오답/힌트</th><th>시간</th><th>조작</th></tr></thead><tbody>'
      +(teams.length?teams.map(function(t){ var r=t.round||0, tm=t.start?fmt(((t.end||Date.now())-t.start)/1000):'-', w=0, h=0; Object.keys(t.stats||{}).forEach(function(s){ w+=t.stats[s].wrong; h+=t.stats[s].hints; });
@@ -1922,7 +1954,118 @@ function viewTeacher(){ var ok=false; try{ ok=sessionStorage.getItem('tag_t')===
     $('bReflCsv').onclick=function(){ var rows=[['반','모둠','이름','알게 된 점','깨달은 점','실천할 점','제출 시각']].concat((LOCAL.refls||[]).map(function(r){ return [cls,r.team,r.name,r.learn,r.realize,r.act,r.at?new Date(r.at).toLocaleString('ko-KR'):'']; }));
       var csv='\ufeff'+rows.map(function(r){ return r.map(function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; }).join(','); }).join('\r\n');
       var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='TAG_다짐_'+cls+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){ a.remove(); },500); };
-    $('bClear').onclick=function(){ askBox({title:cls+' 반의 기록을 모두 삭제할까요?', ok:'전체 삭제', cb:function(){ S.clearRoom(cls); }}); }; }); }
+    $('bClear').onclick=function(){ askBox({title:cls+' 반의 기록을 모두 삭제할까요?', ok:'전체 삭제', cb:function(){ S.clearRoom(cls); }}); }; bindDashTabs(); };
+  unsub=S.watchAll(LOCAL.dashFn); }
+
+/* ---------- 교사 대시보드: 탭 · 전체 반 · 개인별 평가 기록 ---------- */
+function dashTabs(cls){ var tb=LOCAL.dashTab||'live';
+  return '<div class="dtabs">'+[['live','📊 '+esc(cls)+' 반 현황'],['all','🏫 전체 반'],['eval','🧑‍🎓 개인별 평가 기록']].map(function(x){ return '<button class="'+(tb===x[0]?'sel':'alt')+'" data-tab="'+x[0]+'">'+x[1]+'</button>'; }).join('')+'<button class="small" id="dStale" style="display:none">🔄 새 기록 반영</button></div>'; }
+function bindDashTabs(){ qa('.dtabs [data-tab]').forEach(function(b){ b.onclick=function(){ LOCAL.dashTab=b.dataset.tab; renderDash(); }; }); if($('dStale')) $('dStale').onclick=function(){ renderDash(); }; }
+function dashStale(){ var b=$('dStale'); if(b && document.activeElement && /TEXTAREA|INPUT|SELECT/.test(document.activeElement.tagName)){ b.style.display=''; return; } if(b){ b.style.display=''; } }
+function renderDash(){ var tb=LOCAL.dashTab||'live'; if(tb==='live') return LOCAL.dashFn(LOCAL.allRooms||{}); if(tb==='all') return viewAllRooms(); viewEval(); }
+function dashShell(inner){ var cls=LOCAL.dashCls; $app.innerHTML='<div class="wrap wide-wrap">'+TAPE+'<div class="hud" style="display:flex;align-items:center"><h2>👩‍🏫 교사 대시보드 · '+esc(cls)+'</h2><span class="k" style="margin-left:auto">'+(S.mode==='local'?'로컬 테스트 모드':'Firebase 실시간')+'</span></div>'+dashTabs(cls)+inner+'</div>'; bindDashTabs(); }
+function teamList(room){ return Object.keys((room||{}).teams||{}).map(function(k){ return room.teams[k]; }); }
+
+/* 전체 반 */
+function viewAllRooms(){ var all=LOCAL.allRooms||{}, ids=Object.keys(all).sort();
+  var rows=ids.map(function(id){ var ts=teamList(all[id]), st=0, esc_=0, dur=[], deaths=0, refl=0, last=0;
+    ts.forEach(function(t){ st+=Object.keys(t.players||{}).length; if(t.status==='done'){ esc_++; if(t.start&&t.end) dur.push((t.end-t.start)/1000); } deaths+=t.deaths||0; refl+=Object.keys(t.refl||{}).length;
+      Object.keys(t.log||{}).forEach(function(s){ (t.log[s]||[]).forEach(function(e){ if(e.at>last) last=e.at; }); }); if(t.start>last) last=t.start; });
+    var avg=dur.length?fmt(dur.reduce(function(a,b){return a+b;},0)/dur.length):'-';
+    return '<tr><td><b>'+esc(id)+'</b></td><td>'+ts.length+'</td><td>'+st+'</td><td>'+esc_+' / '+ts.length+'</td><td>'+avg+'</td><td>'+deaths+'</td><td>'+refl+' / '+st+'</td><td>'+(last?new Date(last).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'-')+'</td><td><button class="small" data-go="'+esc(id)+'">이 반 보기</button> <button class="small alt" data-ev="'+esc(id)+'">평가 기록</button></td></tr>'; }).join('');
+  dashShell('<div class="lbl tblwrap mt"><table><thead><tr><th>반</th><th>모둠/개인</th><th>학생 수</th><th>탈출</th><th>평균 탈출 시간</th><th>반송</th><th>다짐 제출</th><th>최근 활동</th><th></th></tr></thead><tbody>'
+    +(rows||'<tr><td colspan="9" class="muted" style="padding:30px">아직 기록이 있는 반이 없어요.</td></tr>')+'</tbody></table></div>'
+    +'<p class="muted mt" style="font-size:12.5px">반 코드별로 모인 기록이에요. [평가 기록]을 누르면 그 반 학생들의 개인별 기록을 볼 수 있어요.</p>');
+  qa('[data-go]').forEach(function(b){ b.onclick=function(){ history.replaceState(null,'','?teacher='+encodeURIComponent(b.dataset.go)); LOCAL.dashCls=b.dataset.go; LOCAL.dashTab='live'; viewTeacher(); }; });
+  qa('[data-ev]').forEach(function(b){ b.onclick=function(){ LOCAL.evalScope=b.dataset.ev; LOCAL.dashTab='eval'; viewEval(); }; }); }
+
+/* 개인별 평가: 계산 */
+var ROUND_PHRASE=['제품의 분리배출 표시와 친환경 소재를 구별하며 자원의 유한성과 생산 단계의 환경 영향을 이해',
+ '불필요한 일회용품을 거절하고 녹색 제품을 고르는 등 기회비용을 고려하여 지속 가능한 소비를 선택',
+ '의복 관리와 에너지 절약 방법을 적용하여 자원을 아끼고 수명을 늘리는 사용 방법을 탐색',
+ '올바른 분리배출과 업사이클링 방법을 적용하여 버려지는 물건을 다시 자원으로 순환시키는 방법을 제시'];
+var DEFAULT_MEMO_SET={}; (typeof MEMO_OPTS!=='undefined'?MEMO_OPTS:[]).forEach(function(m){ DEFAULT_MEMO_SET[m]=1; });
+function lv(x){ return x==='상'?'hi':x==='중'?'mid':x==='하'?'lo':'na'; }
+function studentRecs(scope){ var all=LOCAL.allRooms||{}, out=[];
+  Object.keys(all).sort().forEach(function(cid){ if(scope!=='*' && cid!==scope) return;
+    teamList(all[cid]).sort(function(a,b){ return (a.solo?1:0)-(b.solo?1:0)||((+a.id||0)-(+b.id||0)); }).forEach(function(t){ if(!t.seats||!t.seats.length) return;
+      t.seats.forEach(function(seat){ var pl=(t.players||{})[seat]||{}, log=(t.log||{})[seat]||[], rounds=[], exp=0;
+        for(var r=0;r<4;r++){ var os=(t.status==='lobby')?[]:objsOfSeat(t,seat,r); rounds.push(os); os.forEach(function(o){ exp+=SCN[o][r].steps.filter(function(x){ return x.type!=='info'; }).length; }); }
+        var oks=log.filter(function(e){ return e.ok; }), uniq={}; oks.forEach(function(e){ uniq[e.s]=e; });
+        var solved=Object.keys(uniq).length, first=oks.filter(function(e){ return !e.w&&!e.h; }).length;
+        var wrong=log.reduce(function(a,e){ return a+(e.w||0); },0), hints=log.reduce(function(a,e){ return a+(e.h||0); },0)+log.filter(function(e){ return e.ty==='far'; }).length;
+        var dies=log.filter(function(e){ return e.die; }), memos=log.filter(function(e){ return e.ty==='memo'; });
+        var secs=oks.map(function(e){ return e.sec||0; }), avg=secs.length?Math.round(secs.reduce(function(a,b){return a+b;},0)/secs.length):0;
+        var perR=[0,1,2,3].map(function(r){ var es=oks.filter(function(e){ return e.r===r; }); return {n:es.length, f:es.filter(function(e){ return !e.w&&!e.h; }).length}; });
+        var game=((t.final||{}).by||{})[seat]||0, gc=((t.final||{}).gc||{})[seat]||{ok:0,ng:0}, refl=(t.refl||{})[seat]||null, tnote=(t.tnote||{})[seat]||'';
+        var acc=oks.length?first/oks.length:0, comp=exp?Math.min(1,solved/exp):0;
+        var L1=oks.length<3?'-':(acc>=.7?'상':acc>=.4?'중':'하');
+        var L2=(t.status==='lobby')?'-':((comp>=.9||t.status==='done'||t.status==='final')&&(dies.length<=1||comp>=.9)?'상':comp>=.5?'중':'하');
+        var gameAvg=0; if(t.final&&t.final.by){ var v=Object.keys(t.final.by).map(function(k){return t.final.by[k];}); gameAvg=v.reduce(function(a,b){return a+b;},0)/Math.max(1,v.length); }
+        var L3=t.solo?'혼자':((memos.length>=2&&(game>=gameAvg*.8||!t.final))?'상':(memos.length>=1||game>0)?'중':'하');
+        var rl=refl?(refl.learn||'').length+(refl.realize||'').length+(refl.act||'').length:0, L4=!refl?'미제출':rl>=90?'상':rl>=45?'중':'하';
+        out.push({cls:cid, team:t.solo?'개인':t.id+'모둠', teamId:t.id, seat:seat, name:pl.name||seat, solo:!!t.solo, t:t, rounds:rounds, log:log, exp:exp, solved:solved, first:first, okn:oks.length, acc:acc, comp:comp, wrong:wrong, hints:hints, dies:dies, memos:memos, avg:avg, perR:perR, game:game, gc:gc, refl:refl, tnote:tnote, L:[L1,L2,L3,L4], status:t.status}); }); }); });
+  return out; }
+function seteukDraft(x){ var objs={}; x.rounds.forEach(function(os){ os.forEach(function(o){ objs[o]=1; }); }); var on=Object.keys(objs).map(function(o){ return OBJ[o].name; });
+  var p=[];
+  p.push('‘생활 자원의 순환과 지속 가능한 선택’ 단원의 순환 릴레이 방탈출 활동에서 '+(on.length?on.join('·')+'의 입장이 되어 ':'')+'생산·구매·사용·폐기 단계의 과제를 '+(x.solo?'스스로':'모둠원과 물건을 주고받으며')+' 해결함.');
+  var best=x.perR.map(function(v,i){ return {i:i, rate:v.n?v.f/v.n:0, n:v.n}; }).filter(function(v){ return v.n>=1 && v.rate>=.6; }).sort(function(a,b){ return b.rate-a.rate||b.n-a.n; }).slice(0,2);
+  if(best.length) p.push(best.length>1?ROUND_PHRASE[best[0].i]+'하고, '+ROUND_PHRASE[best[1].i]+'함.':ROUND_PHRASE[best[0].i]+'함.');
+  else if(x.okn) p.push('과제마다 힌트와 단서를 적극 활용하며 자원 순환의 각 단계를 끝까지 탐구함.');
+  if(x.dies.length && x.comp>=.6) p.push('실패(반송)한 뒤 얻은 단서를 활용해 다시 도전하여 과제를 완수하는 끈기를 보임.');
+  else if(x.acc>=.8 && x.okn>=5) p.push('대부분의 과제를 첫 시도에 해결할 만큼 개념을 정확하게 적용함.');
+  if(!x.solo){ var own=x.memos.map(function(m){ return m.txt; }).filter(function(m){ return m && !DEFAULT_MEMO_SET[m]; });
+    if(own.length) p.push('다음 친구에게 “'+cut(own[0],40)+'”와 같은 인수인계 메모를 남겨 정보를 나누며 협력함.');
+    else if(x.memos.length) p.push('라운드마다 인수인계 메모를 남겨 다음 친구의 문제 해결을 도움.');
+    if(x.gc.ok) p.push('최종 분리배출 크레인 게임에서 '+x.gc.ok+'개의 쓰레기를 알맞게 분류하여 모둠의 탈출에 기여함.'); }
+  else if(x.gc.ok) p.push('최종 분리배출 게임에서 '+x.gc.ok+'개의 쓰레기를 알맞게 분류함.');
+  if(x.refl){ if(x.refl.learn) p.push('활동 후 “'+cut(x.refl.learn,45)+'”라는 점을 새롭게 알게 되었다고 성찰하였고,'); if(x.refl.act) p.push('“'+cut(x.refl.act,50)+'”라고 다짐하여 일상에서 자원 순환을 실천하려는 의지를 보임.'); }
+  if(x.tnote) p.push(x.tnote);
+  return p.join(' ').replace(/,\s*$/,'.').replace(/고,\s+“/,'고, “'); }
+function cut(s,n){ s=String(s||'').replace(/\s+/g,' ').trim(); return s.length>n?s.slice(0,n)+'…':s; }
+function bytesNeis(s){ var b=0; for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); b+=c>127?3:(c===10?2:1); } return b; }
+
+/* 개인별 평가: 화면 */
+function viewEval(){ var all=LOCAL.allRooms||{}, scope=LOCAL.evalScope||LOCAL.dashCls; if(scope!=='*'&&!all[scope]) scope=LOCAL.dashCls;
+  var recs=studentRecs(scope); LOCAL.evalRecs=recs;
+  var opts='<option value="*"'+(scope==='*'?' selected':'')+'>전체 반</option>'+Object.keys(all).sort().map(function(id){ return '<option value="'+esc(id)+'"'+(scope===id?' selected':'')+'>'+esc(id)+' 반</option>'; }).join('');
+  var body=recs.map(function(x,i){ return '<tr class="erow" data-i="'+i+'"><td>'+esc(x.cls)+'</td><td>'+esc(x.team)+'</td><td><b>'+esc(x.name)+'</b></td><td>'+x.rounds.map(function(os){ return os.map(function(o){ return OBJ[o].emoji; }).join('')||'·'; }).join(' → ')+'</td>'
+      +'<td>'+x.solved+' / '+x.exp+'</td><td>'+(x.okn?Math.round(x.acc*100)+'%':'-')+'</td><td>'+x.wrong+'</td><td>'+x.hints+'</td><td>'+x.dies.length+'</td><td>'+(x.avg?fmt(x.avg):'-')+'</td><td>'+(x.solo?'-':x.memos.length)+'</td><td>'+(x.gc.ok||0)+'/'+((x.gc.ok||0)+(x.gc.ng||0))+'</td>'
+      +x.L.map(function(l){ return '<td><span class="lv '+lv(l)+'">'+l+'</span></td>'; }).join('')+'<td>'+(x.refl?'✔':'')+'</td><td><button class="small alt" data-open="'+i+'">자세히 ▸</button></td></tr>'; }).join('');
+  dashShell('<div class="lbl pad mt"><div class="evtop"><label style="margin:0">범위</label><select id="evScope" style="width:auto">'+opts+'</select><span class="muted" style="font-size:12.5px">학생 '+recs.length+'명</span>'
+    +'<span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap"><button class="small" id="csvSum">⬇ 개인별 요약 CSV</button><button class="small alt" id="csvLog">⬇ 상세 활동 로그 CSV</button><button class="small alt" id="csvSet">⬇ 과세특 초안 CSV</button></span></div>'
+    +'<details class="rub mt"><summary>📏 수준 산출 기준 (자동 참고값 — 교사 관찰로 보정하세요)</summary><ul>'
+    +'<li><b>지식·이해</b>: 해결한 과제 중 오답·힌트 없이 첫 시도에 맞힌 비율 — 70% 이상 상, 40% 이상 중, 그 밖 하 (해결 3개 미만은 -)</li>'
+    +'<li><b>문제 해결·끈기</b>: 맡은 과제 완료율과 탈출 여부 — 90% 이상 완료 또는 탈출하고 반송 1회 이하(또는 반송 후 완수) 상, 50% 이상 중, 그 밖 하</li>'
+    +'<li><b>협력·소통</b>(모둠): 인수인계 메모 2개 이상이고 최종 게임 기여가 모둠 평균의 80% 이상이면 상, 메모 1개 이상 또는 게임 참여 중, 그 밖 하</li>'
+    +'<li><b>성찰·실천 의지</b>: 다짐 세 칸 합계 90자 이상 상, 45자 이상 중, 그 밖 하, 안 쓰면 미제출</li></ul></details>'
+    +'<div class="tblwrap mt"><table class="evtbl"><thead><tr><th>반</th><th>모둠</th><th>이름</th><th>맡은 물건 R1→R4</th><th>해결/맡은 과제</th><th>첫 시도 정답률</th><th>오답</th><th>힌트</th><th>반송</th><th>과제당 평균</th><th>메모</th><th>게임 분류</th><th>지식·이해</th><th>문제해결</th><th>협력</th><th>성찰</th><th>다짐</th><th></th></tr></thead><tbody>'
+    +(body||'<tr><td colspan="18" class="muted" style="padding:30px">아직 기록이 없어요.</td></tr>')+'</tbody></table></div><div id="evDetail"></div></div>');
+  $('evScope').onchange=function(){ LOCAL.evalScope=this.value; viewEval(); };
+  qa('[data-open]').forEach(function(b){ b.onclick=function(){ var i=+b.dataset.open, box=$('evDetail'); qa('.evtbl tr.on').forEach(function(r){ r.classList.remove('on'); });
+    if(LOCAL.evOpen===i && box.innerHTML){ box.innerHTML=''; LOCAL.evOpen=null; return; } LOCAL.evOpen=i; b.closest('tr').classList.add('on'); var x=recs[i];
+    box.innerHTML='<div class="evcard mt"><div class="evhead"><b>'+esc(x.cls)+' · '+esc(x.team)+' · '+esc(x.name)+'</b><span>'+x.L.map(function(l,k){ return ['지식·이해','문제해결','협력','성찰'][k]+' <span class="lv '+lv(l)+'">'+l+'</span>'; }).join(' ')+'</span><button class="small alt" id="evX">닫기 ✕</button></div>'+evalDetail(x,i)+'</div>';
+    bindDetail(x,i); $('evX').onclick=function(){ box.innerHTML=''; LOCAL.evOpen=null; b.closest('tr').classList.remove('on'); }; box.scrollIntoView({behavior:'smooth',block:'start'}); }; });
+  $('csvSum').onclick=function(){ dlCsv('TAG_개인별요약_'+(scope==='*'?'전체':scope)+'.csv', [['반','모둠','이름','R1 물건','R2 물건','R3 물건','R4 물건','해결 과제','맡은 과제','첫 시도 정답률(%)','오답','힌트','반송','과제당 평균(초)','인수인계 메모','게임 정분류','게임 오분류','지식·이해','문제해결·끈기','협력·소통','성찰·실천','알게 된 점','깨달은 점','실천할 점','교사 메모','모둠 결과']].concat(recs.map(function(x){ return [x.cls,x.team,x.name].concat(x.rounds.map(function(os){ return os.map(function(o){return OBJ[o].name;}).join('+'); })).concat([x.solved,x.exp,x.okn?Math.round(x.acc*100):'',x.wrong,x.hints,x.dies.length,x.avg,x.solo?'':x.memos.length,x.gc.ok||0,x.gc.ng||0]).concat(x.L).concat([x.refl?x.refl.learn:'',x.refl?x.refl.realize:'',x.refl?x.refl.act:'',x.tnote,{done:'탈출',final:'최종 단계',play:'진행 중',lobby:'대기'}[x.status]||x.status]); }))); };
+  $('csvLog').onclick=function(){ var rows=[['반','모둠','이름','시각','라운드','물건','과제','유형','결과','걸린 시간(초)','오답','힌트','비고']]; recs.forEach(function(x){ x.log.forEach(function(e){ rows.push([x.cls,x.team,x.name,new Date(e.at).toLocaleString('ko-KR'),e.r!=null?'R'+(e.r+1)+' '+ROUNDS[e.r].name:'',e.o?OBJ[e.o].name:'',logLabel(e),e.ty||'',e.die?'반송('+(ENDINGS[e.die]||{}).name+')':e.ok?'통과':e.ty==='memo'?'메모':e.ty==='far'?'힌트 열기':'',e.sec||'',e.w||0,e.h||0,e.txt||'']); }); }); dlCsv('TAG_상세로그_'+(scope==='*'?'전체':scope)+'.csv',rows); };
+  $('csvSet').onclick=function(){ dlCsv('TAG_과세특초안_'+(scope==='*'?'전체':scope)+'.csv',[['반','모둠','이름','과세특 초안','글자 수','NEIS 바이트(추정)']].concat(recs.map(function(x){ var d=(LOCAL.setDraft||{})[x.cls+'|'+x.teamId+'|'+x.seat]||seteukDraft(x); return [x.cls,x.team,x.name,d,d.length,bytesNeis(d)]; }))); }; }
+function logLabel(e){ if(e.ty==='memo') return '인수인계 메모'; if(e.ty==='far') return '단톡방 [멀리서 보기] 힌트'; return stepLabel(e.s||''); }
+function evalDetail(x,i){ var rows=x.log.map(function(e){ var res=e.die?'<span class="lv lo">반송</span>':e.ok?(!e.w&&!e.h?'<span class="lv hi">첫 시도 통과</span>':'<span class="lv mid">통과</span>'):e.ty==='memo'?'📝':e.ty==='far'?'💡':'';
+      return '<tr><td>'+new Date(e.at).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})+'</td><td>'+(e.r!=null?'R'+(e.r+1)+' '+ROUNDS[e.r].name:'')+'</td><td class="l">'+esc(logLabel(e))+(e.txt?'<br><small>“'+esc(e.txt)+'”</small>':'')+'</td><td>'+res+'</td><td>'+(e.sec?fmt(e.sec):'')+'</td><td>'+(e.w||'')+'</td><td>'+(e.h||'')+'</td></tr>'; }).join('');
+  var key=x.cls+'|'+x.teamId+'|'+x.seat, d=(LOCAL.setDraft||{})[key]||seteukDraft(x);
+  return '<div class="edbox"><div class="edcol"><h4>🕒 활동 타임라인</h4><div class="tblwrap" style="max-height:300px"><table class="mini"><thead><tr><th>시각</th><th>라운드</th><th>과제</th><th>결과</th><th>시간</th><th>오답</th><th>힌트</th></tr></thead><tbody>'+(rows||'<tr><td colspan="7" class="muted">기록 없음</td></tr>')+'</tbody></table></div>'
+   +(x.refl?'<h4 class="mt">📮 다짐 택배</h4><div class="rq"><b>📘 알게 된 점</b> '+esc(x.refl.learn)+'</div><div class="rq"><b>💡 깨달은 점</b> '+esc(x.refl.realize)+'</div><div class="rq"><b>✊ 실천할 점</b> '+esc(x.refl.act)+'</div>':'<p class="muted mt">다짐 미제출</p>')+'</div>'
+   +'<div class="edcol"><h4>👀 교사 관찰 메모</h4><textarea id="tn'+i+'" rows="3" placeholder="수업 중 관찰한 모습(예: 모둠원에게 분리배출 표시를 설명해 줌)">'+esc(x.tnote)+'</textarea><button class="small mt" id="tns'+i+'">메모 저장</button>'
+   +'<h4 class="mt">✍️ 과세특 초안 <span class="muted" style="font-size:12px">(자동 생성 · 고쳐서 쓰세요)</span></h4><textarea id="sd'+i+'" rows="8">'+esc(d)+'</textarea><div class="sdc" id="sc'+i+'"></div>'
+   +'<div class="row mt" style="gap:6px"><button class="small alt" id="sr'+i+'">↺ 다시 생성</button><button class="small" id="sp'+i+'">📋 복사</button></div></div></div>'; }
+function bindDetail(x,i){ var key=x.cls+'|'+x.teamId+'|'+x.seat, ta=$('sd'+i);
+  function cnt(){ $('sc'+i).textContent=ta.value.length+'자 · NEIS 약 '+bytesNeis(ta.value)+'바이트 (한글 3바이트 기준)'; }
+  ta.oninput=function(){ LOCAL.setDraft=LOCAL.setDraft||{}; LOCAL.setDraft[key]=ta.value; cnt(); }; cnt();
+  $('sr'+i).onclick=function(){ x.tnote=$('tn'+i).value.trim(); ta.value=seteukDraft(x); LOCAL.setDraft=LOCAL.setDraft||{}; LOCAL.setDraft[key]=ta.value; cnt(); };
+  $('sp'+i).onclick=function(){ (navigator.clipboard?navigator.clipboard.writeText(ta.value):Promise.reject()).then(function(){ toast('📋 복사했어요'); },function(){ ta.select(); }); };
+  $('tns'+i).onclick=function(){ var v=$('tn'+i).value.trim(); S.updateTeam(x.cls,x.teamId,function(t){ if(!t) return undefined; t.tnote=t.tnote||{}; t.tnote[x.seat]=v; return t; }).then(function(){ x.tnote=v; toast('👀 관찰 메모를 저장했어요'); }); }; }
+function dlCsv(name,rows){ var csv='﻿'+rows.map(function(r){ return r.map(function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }).join(','); }).join('\r\n');
+  var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ a.remove(); },500); }
 
 /* ============================== 시작 ============================== */
 (function boot(){ ROUGH=''; bindFooter();
