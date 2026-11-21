@@ -703,7 +703,7 @@ table.mini th,table.mini td{font-size:12.5px;padding:4px 6px}table.mini td.l{whi
 .bstart h2{font-size:34px;color:#ffd34d}.bstart .row button{white-space:nowrap;font-size:18px;padding:12px 18px}.bstart p{line-height:1.7;margin:10px 0 16px;font-size:15px}.bstart button{font-size:20px;padding:12px 26px;background:var(--orange)}
 .bres b{font-family:'Black Han Sans';font-weight:400;font-size:80px;color:#ffd34d}.brec{color:#7dff9d;font-family:'Jua';font-size:20px}
 .bmsg{min-height:52px;padding:10px 14px;font-size:14.5px;line-height:1.5;background:#2b1d12;color:#fffdf7}.bmsg.good{background:#1f4d2e}.bmsg.bad{background:#5a2018}
-.board h3{font-size:22px;margin-bottom:6px}.board{padding:12px 16px}.brow{display:flex;align-items:center;gap:10px;font-family:'Jua';font-size:18px;padding:4px 0;border-bottom:1px dashed #0002}.brow b{width:30px;text-align:center}.brow small{color:var(--ink2);font-size:13px}.brow em{margin-left:auto;font-style:normal;font-family:'Black Han Sans';font-size:22px;color:var(--red)}
+.board h3{font-size:22px;margin-bottom:6px}.endboard{max-width:620px;margin:20px auto 0;text-align:left;color:var(--ink)}.waitend{margin-top:14px;padding:14px 18px;font-family:'Jua';font-size:20px;text-align:center}.waitend small{display:block;font-size:14px;color:var(--ink2);margin-top:4px}.board{padding:12px 16px}.brow{display:flex;align-items:center;gap:10px;font-family:'Jua';font-size:18px;padding:4px 0;border-bottom:1px dashed #0002}.brow b{width:30px;text-align:center}.brow small{color:var(--ink2);font-size:13px}.brow em{margin-left:auto;font-style:normal;font-family:'Black Han Sans';font-size:22px;color:var(--red)}
 /* ================= 반응형: 휴대폰 · 태블릿 세로 · 태블릿/노트북 가로 · 전자칠판 ================= */
 .pgrid,.pside,.pmain{min-width:0}
 @media (min-width:700px){
@@ -1950,7 +1950,9 @@ function bonusGame(){ if($('bonus')) return;
       if(right){ G.combo++; G.best=Math.max(G.best,G.combo); var mul=G.combo>=5?3:G.combo>=3?2:1; G.score+=mul; G.ok++; SFX.ok(); pop('+'+mul+(mul>1?'  COMBO ×'+mul:''),'good'); msg('✅ '+it[1]+' → '+b[1]+' '+b[2]+'. '+it[3],'good'); }
       else { G.combo=0; G.ng++; G.score=Math.max(0,G.score-1); SFX.bad(); var rb=BINS.filter(function(x){ return x[0]===it[2]; })[0]; pop('−1','bad'); msg('❌ '+it[1]+'은(는) <b>'+rb[1]+' '+rb[2]+'</b>! '+it[3],'bad'); } }
     $('bS').textContent=G.score; $('bC').textContent=G.combo>=3?'🔥 COMBO '+G.combo:''; setTimeout(function(){ G.busy=false; if(G.run) newItem(); },450); }
-  function start(){ $('bStart').style.display='none'; G.run=true; newItem(); SFX.key(3);
+  function live(on){ S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; t.blive=t.blive||{}; if(on) t.blive[ME.seat]=Date.now(); else delete t.blive[ME.seat]; return t; }).catch(function(){}); }
+  live(true);
+  function start(){ $('bStart').style.display='none'; G.run=true; newItem(); SFX.key(3); live(true);
     timer=setInterval(function(){ G.t--; $('bT').textContent=G.t; if(G.t<=5&&G.t>0) tone([880],.05,'square'); if(G.t<=0) finish(); },1000); }
   function finish(){ clearInterval(timer); G.run=false; $('bFly').innerHTML=''; SFX.win();
     var mine=(TEAM&&TEAM.bonus&&TEAM.bonus[ME.seat])||null, rec=!mine||G.score>(mine.score||0);
@@ -1962,7 +1964,7 @@ function bonusGame(){ if($('bonus')) return;
     S.updateTeam(ME.cls,ME.team,function(t){ if(!t) return undefined; t.bonus=t.bonus||{}; var old=t.bonus[ME.seat]; addLog(t,{ty:'bonus',s:'bonus',sc:res.score,ok:res.ok,ng:res.ng,cb:res.combo});
       if(!old||res.score>(old.score||0)){ t.bonus[ME.seat]=res; } t.bonusPlays=(t.bonusPlays||0)+1; return t; })
     .then(function(t){ if(t) TEAM=t; if(rec && res.score>0 && !TEAM.solo) S.pushEvent(ME.cls,'🏀 '+res.name+' 보너스 슛 '+res.score+'점! (콤보 '+res.combo+')','bonus'); else if(rec && res.score>0) S.pushEvent(ME.cls,'🏀 '+res.name+' 보너스 슛 '+res.score+'점!','bonus'); }); }
-  function close(){ clearInterval(timer); G.run=false; window.removeEventListener('resize',drawBins); d.remove(); }
+  function close(){ clearInterval(timer); G.run=false; window.removeEventListener('resize',drawBins); d.remove(); live(false); }
   $('bGo').onclick=start; $('bQuit').onclick=close; }
 function trueCard(quiet){ var t=TEAM; if(!quiet){ sWin(); setTimeout(function(){ confetti(60); },200); }
   var dur=t.end&&t.start?fmt((t.end-t.start)/1000):'-', all=Object.keys(ENDINGS);
@@ -1987,10 +1989,14 @@ function trueCard(quiet){ var t=TEAM; if(!quiet){ sWin(); setTimeout(function(){
 /* ============================== TV ============================== */
 function viewTV(){ var cls=qs('tv'); if(!cls){ askBox({title:'📺 교실 TV', msg:'반 코드를 입력하세요', input:'text', ph:'1-3', noCancel:true, cb:function(v){ history.replaceState(null,'','?tv='+encodeURIComponent(v)); viewTV(); }}); return; }
   var last=0;
-  S.watchRoom(cls,function(room){ var teams=Object.keys(room.teams).map(function(k){return room.teams[k];}).filter(function(t){return !t.solo;}).sort(function(a,b){return (+a.id||0)-(+b.id||0);});
+  var tvRoom=null; if(LOCAL.tvTick) clearInterval(LOCAL.tvTick); LOCAL.tvTick=setInterval(function(){ if(tvRoom) tvRender(tvRoom); },20000);
+  S.watchRoom(cls,function(room){ tvRoom=room; tvRender(room); });
+  function tvRender(room){ var teams=Object.keys(room.teams).map(function(k){return room.teams[k];}).filter(function(t){return !t.solo;}).sort(function(a,b){return (+a.id||0)-(+b.id||0);});
     var icons=[]; teams.forEach(function(t){ if(t.status!=='done') (t.deathLog||[]).forEach(function(d){ icons.push(d.obj); }); });
     var kg=icons.length*7, rows=[], k=0, w=2*Math.ceil(Math.sqrt(icons.length||1))-1; while(k<icons.length){ rows.push(icons.slice(k,k+w)); k+=w; if(w>1) w-=2; } var hillH=Math.min(330,30+rows.length*44);
-    var allDone=teams.length && teams.every(function(t){return t.status==='done';});
+    var now=Date.now(), allTeamsDone=teams.length && teams.every(function(t){return t.status==='done';});
+    var pending=[]; teams.forEach(function(t){ (t.seats||[]).forEach(function(s){ var nm=((t.players||{})[s]||{}).name||s; if(!(t.refl||{})[s]) pending.push(nm+' (다짐)'); var bl=(t.blive||{})[s]; if(bl && now-bl<180000) pending.push(nm+' (보너스 중)'); }); });
+    var allDone=allTeamsDone && !pending.length;
     $app.innerHTML='<div class="tvwrap">'+TAPE+'<div class="tvhead"><div><div class="k">TAG: 버려지기 전에 · 교실 상황판</div><h1>우리 반 쓰레기산 · '+esc(cls)+'</h1></div><div class="ju" style="font-size:20px">탈출 '+teams.filter(function(t){return t.status==='done';}).length+' / '+teams.length+' 모둠</div></div>'
      +'<div class="tvgrid"><div class="lbl mountain"><div class="kg">'+kg+'<small>kg</small></div><div class="ju muted" style="position:absolute;left:24px;top:96px;font-size:14px">물건이 반송될 때마다 산이 높아진다 · 모둠이 탈출하면 그 모둠의 쓰레기가 사라진다</div>'
      +'<svg style="position:absolute;left:0;bottom:0;width:100%;height:'+hillH+'px" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M-2 102 Q20 70 38 30 Q50 -2 62 30 Q80 70 102 102Z" fill="#c99a5d" stroke="#2b1d12" stroke-width="1" vector-effect="non-scaling-stroke"/></svg>'
@@ -2000,8 +2006,9 @@ function viewTV(){ var cls=qs('tv'); if(!cls){ askBox({title:'📺 교실 TV', m
         return '<div class="lbl tcard '+(t.status==='done'?'done':'')+'"><h3><span>'+esc(t.id)+'모둠</span><span style="font-size:16px">'+st+'</span></h3><div class="objs">'+(objs||'…')+'</div><div class="ju muted" style="font-size:13px">'+SEATS.filter(function(s){return t.players[s];}).map(function(s){return s+' '+esc(t.players[s].name);}).join(' · ')+'</div><div class="ju" style="font-size:13px;margin-top:4px">반송 '+(t.deaths||0)+'회</div></div>'; }).join(''):'<div class="lbl pad ju">아직 입장한 모둠이 없어요</div>')+'</div></div>'
      +(function(){ var lb=roomBonus(room).slice(0,5); return lb.length?'<div class="lbl board"><h3>🏆 보너스 슛 TOP 5</h3>'+lb.map(function(x,i){ return '<div class="brow"><b>'+['🥇','🥈','🥉','4','5'][i]+'</b><span>'+esc(x.name)+' <small>'+esc(x.team)+'</small></span><em>'+x.score+'점</em></div>'; }).join('')+'</div>':''; })()
      +'<div class="lbl ticker">'+(room.events||[]).slice(-4).reverse().map(function(e){ return '<div>'+esc(e.text)+'</div>'; }).join('')+'</div></div>'
-     +(allDone?'<div class="classend">'+TAPE+'<div class="letter" style="font-size:130px">LOOP</div><h1 style="margin-top:10px;font-size:46px">우리 반 쓰레기산 0kg</h1><p class="ju" style="font-size:20px;margin-top:10px">사진작가가 다시 찍은 사진: 쓰레기 더미가 있던 자리에 다시 태어난 물건들</p><div class="cast">'+sticker('pet','happy',90)+sticker('shirt','happy',100)+sticker('chair','happy',94)+sticker('apple','happy',88)+'</div></div>':'');
-    var newest=(room.events||[]).length?room.events[room.events.length-1].ts:0; if(newest>last){ if(last) tone([330,440],.08); last=newest; } }); }
+     +(allDone?'<div class="classend">'+TAPE+'<div class="letter" style="font-size:130px">LOOP</div><h1 style="margin-top:10px;font-size:46px">우리 반 쓰레기산 0kg</h1><p class="ju" style="font-size:20px;margin-top:10px">사진작가가 다시 찍은 사진: 쓰레기 더미가 있던 자리에 다시 태어난 물건들</p><div class="cast">'+sticker('pet','happy',90)+sticker('shirt','happy',100)+sticker('chair','happy',94)+sticker('apple','happy',88)+'</div>'+(function(){ var lb=roomBonus(room).slice(0,5); return lb.length?'<div class="lbl board endboard"><h3>🏆 보너스 슛 최종 TOP 5</h3>'+lb.map(function(x,i){ return '<div class="brow"><b>'+['🥇','🥈','🥉','4','5'][i]+'</b><span>'+esc(x.name)+' <small>'+esc(x.team)+'</small></span><em>'+x.score+'점</em></div>'; }).join('')+'</div>':''; })()+'</div>'
+     :(allTeamsDone?'<div class="lbl waitend">✨ 모든 모둠 탈출 완료! 마지막 장면은 모두가 다짐을 보내고 보너스 게임을 마치면 열려요. <small>남은 친구: '+pending.slice(0,12).map(esc).join(', ')+(pending.length>12?' 외 '+(pending.length-12)+'명':'')+'</small></div>':''));
+    var newest=(room.events||[]).length?room.events[room.events.length-1].ts:0; if(newest>last){ if(last) tone([330,440],.08); last=newest; } } }
 
 /* ============================== 교사 ============================== */
 function stepLabel(id){ var o=id.split('-')[0]; var all={}; Object.keys(SCN).forEach(function(ob){ SCN[ob].forEach(function(sc,r){ sc.steps.forEach(function(st){ if(st.id) all[st.id]='R'+(r+1)+' '+sc.place+' · '+({lens:'돋보기',pipes:'파이프',route:'지도 경로',scale:'저울',trade:'물물교환',flash:'손전등',lights:'멀티탭',slide:'냉장고 슬라이드',scratch:'문지르기',pieces:'조각 맞추기',disasm:'분해',word:'영문 자물쇠',num:'숫자 자물쇠',order:'순서',choice:'선택',multi:'고르기',gate:'기억'}[st.type]||st.type); }); }); }); return (OBJ[o]?OBJ[o].emoji+' ':'')+(all[id]||id); }
